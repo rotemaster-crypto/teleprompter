@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Teleprompter</title>
+
+<!-- PWA: ลง iPhone แบบ Add to Home Screen -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Teleprompter">
+<meta name="theme-color" content="#0d0f10">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.json">
+
+<style>
+  :root{
+    --bg:#0d0f10; --panel:#16191b; --panel-2:#1e2224; --line:#2a2f31;
+    --ink:#f5f5f0; --ink-dim:#9aa0a2;
+    --tally:#FFB020; --tally-soft:rgba(255,176,32,.16);
+    --rec:#ff3b30;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"Sarabun","Noto Sans Thai",sans-serif;
+    overscroll-behavior:none;}
+  body{overflow:hidden}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+
+  /* ---------- EDITOR ---------- */
+  #editor{height:100dvh;height:100vh;overflow-y:auto;display:flex;flex-direction:column;gap:18px;
+    padding:max(22px,env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom));
+    max-width:760px;margin:0 auto;}
+  .brand{display:flex;align-items:center;gap:12px;padding-top:6px}
+  .brand .mark{width:34px;height:34px;border-radius:9px;background:var(--panel-2);
+    display:flex;flex-direction:column;justify-content:center;gap:3px;padding:8px}
+  .brand .mark i{display:block;height:3px;border-radius:2px;background:var(--ink)}
+  .brand .mark i:nth-child(2){width:70%;opacity:.6}
+  .brand .mark i:nth-child(3){background:var(--tally)}
+  .brand h1{font-size:19px;font-weight:650;letter-spacing:.2px;margin:0}
+  .brand span{color:var(--ink-dim);font-size:13px;margin-left:auto;font-weight:500}
+
+  #script{flex:1;min-height:160px;width:100%;resize:none;background:var(--panel);color:var(--ink);
+    border:1px solid var(--line);border-radius:14px;padding:16px 18px;font-size:17px;line-height:1.7;
+    outline:none;transition:border-color .15s;}
+  #script:focus{border-color:#3a4144}
+  #script::placeholder{color:var(--ink-dim)}
+
+  .desk{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:6px 4px;display:flex;flex-direction:column}
+  .row{display:flex;align-items:center;gap:14px;padding:12px 14px}
+  .row + .row{border-top:1px solid var(--line)}
+  .row label{font-size:15px;font-weight:550;min-width:96px}
+  .row label small{display:block;font-size:11.5px;color:var(--ink-dim);font-weight:400;margin-top:2px}
+  .row .val{margin-left:auto;color:var(--tally);font-variant-numeric:tabular-nums;font-weight:650;font-size:15px;min-width:52px;text-align:right}
+  .row input[type=range]{flex:1;accent-color:var(--tally);height:24px}
+
+  .toggle{margin-left:auto;position:relative;width:50px;height:29px;flex:none;
+    background:var(--panel-2);border-radius:20px;border:1px solid var(--line);transition:.18s}
+  .toggle[data-on="1"]{background:var(--tally);border-color:var(--tally)}
+  .toggle::after{content:"";position:absolute;top:2px;left:2px;width:23px;height:23px;border-radius:50%;background:#fff;transition:.18s}
+  .toggle[data-on="1"]::after{left:23px}
+
+  .start{margin-top:2px;background:var(--tally);color:#1a1200;font-size:18px;font-weight:700;padding:17px;border-radius:14px;
+    letter-spacing:.3px;transition:transform .08s,filter .15s}
+  .start:active{transform:scale(.985);filter:brightness(.95)}
+  .hint{color:var(--ink-dim);font-size:12.5px;text-align:center;line-height:1.6;margin:-4px 2px 0}
+
+  /* ---------- READER ---------- */
+  #reader{position:fixed;inset:0;background:var(--bg);display:none;overflow:hidden}
+  #reader.on{display:block}
+  #cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s;transform:scaleX(1)}
+  #reader.mirror #cam{transform:scaleX(-1)}
+  #reader.cam #cam{opacity:.55}
+
+  #stage{position:absolute;inset:0;overflow:hidden}
+  #scroll{position:absolute;left:0;top:0;width:100%;padding:0 6vw;white-space:pre-wrap;word-break:break-word;
+    will-change:transform;font-weight:600;letter-spacing:.3px;color:var(--ink);text-shadow:0 2px 18px rgba(0,0,0,.65);}
+  #reader.mirror #stage{transform:scaleX(-1)}
+
+  #guide{position:absolute;left:0;right:0;top:38%;pointer-events:none;display:flex;align-items:center;opacity:.9}
+  #guide .bar{flex:1;height:2px;background:linear-gradient(90deg,transparent,var(--tally) 12%,var(--tally) 88%,transparent)}
+  #guide .tri{width:0;height:0;border-top:9px solid transparent;border-bottom:9px solid transparent}
+  #guide .tri.l{border-left:13px solid var(--tally)}
+  #guide .tri.r{border-right:13px solid var(--tally)}
+  #reader.cam #guide{opacity:.55}
+
+  #count{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:22vw;font-weight:800;
+    color:var(--tally);background:rgba(13,15,16,.6);z-index:5}
+  #count.on{display:flex}
+
+  #pausePill{position:absolute;top:38%;left:50%;transform:translate(-50%,-160%);background:rgba(0,0,0,.55);color:var(--ink);
+    padding:8px 18px;border-radius:99px;font-size:14px;font-weight:600;backdrop-filter:blur(6px);opacity:0;transition:.2s;z-index:4}
+  #reader.paused #pausePill{opacity:1}
+
+  /* REC button */
+  #rec{position:absolute;top:calc(10px + env(safe-area-inset-top));left:12px;z-index:8;height:42px;padding:0 14px;
+    border-radius:99px;background:rgba(0,0,0,.45);display:none;align-items:center;gap:9px;backdrop-filter:blur(6px);
+    font-weight:650;font-size:14px}
+  #rec.show{display:flex}
+  #rec .dot{width:14px;height:14px;border-radius:50%;background:var(--rec);flex:none}
+  #rec.recording{background:rgba(255,59,48,.22)}
+  #rec.recording .dot{animation:pulse 1s infinite}
+  #rec .t{font-variant-numeric:tabular-nums;color:var(--ink)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
+
+  #exit{position:absolute;top:calc(10px + env(safe-area-inset-top));right:12px;z-index:8;width:42px;height:42px;
+    border-radius:50%;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
+  #exit svg{width:20px;height:20px;stroke:var(--ink);stroke-width:2.2;fill:none;stroke-linecap:round}
+
+  #bar{position:absolute;left:0;right:0;bottom:0;z-index:6;padding:12px 14px calc(12px + env(safe-area-inset-bottom));
+    background:linear-gradient(180deg,transparent,rgba(13,15,16,.92) 45%);display:flex;align-items:center;gap:6px;transition:opacity .25s,transform .25s}
+  #bar.hide{opacity:0;transform:translateY(12px);pointer-events:none}
+  .ctl{flex:1;height:52px;border-radius:12px;background:rgba(255,255,255,.07);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:2px;font-size:11px;color:var(--ink-dim);font-weight:600}
+  .ctl svg{width:22px;height:22px;stroke:var(--ink);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .ctl.on{background:var(--tally-soft)}.ctl.on svg{stroke:var(--tally)}.ctl.on{color:var(--tally)}
+  .ctl.play{flex:1.4;background:var(--tally)}.ctl.play svg{stroke:#1a1200}.ctl.play{color:#1a1200}
+  .ctl:active{filter:brightness(1.25)}
+
+  /* PREVIEW after recording */
+  #preview{position:absolute;inset:0;z-index:10;background:rgba(8,9,10,.96);display:none;flex-direction:column;
+    gap:14px;padding:max(20px,env(safe-area-inset-top)) 18px calc(20px + env(safe-area-inset-bottom))}
+  #preview.on{display:flex}
+  #preview h2{margin:0;font-size:17px;font-weight:650;display:flex;align-items:center;gap:9px}
+  #preview h2 .d{width:11px;height:11px;border-radius:50%;background:var(--rec)}
+  #preview video{flex:1;min-height:0;width:100%;border-radius:14px;background:#000;object-fit:contain;border:1px solid var(--line)}
+  #preview .note{color:var(--ink-dim);font-size:12.5px;line-height:1.6;text-align:center;margin:0}
+  .pv-actions{display:flex;gap:10px}
+  .pv-btn{flex:1;height:54px;border-radius:13px;font-size:15.5px;font-weight:650;background:var(--panel-2);color:var(--ink);
+    display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line)}
+  .pv-btn.save{background:var(--tally);color:#1a1200;border-color:var(--tally);flex:1.5}
+  .pv-btn svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .pv-btn:active{filter:brightness(1.15)}
+</style>
+</head>
+<body>
+
+<!-- ============ EDITOR ============ -->
+<section id="editor">
+  <div class="brand">
+    <div class="mark"><i></i><i></i><i></i></div>
+    <h1>Teleprompter</h1>
+    <span id="wc">0 คำ</span>
+  </div>
+
+  <textarea id="script" placeholder="วางสคริปต์ที่นี่…&#10;&#10;เว้นบรรทัดได้ตามต้องการ ตัวหนังสือจะเลื่อนขึ้นให้อ่านหน้ากล้องโดยอัตโนมัติ"></textarea>
+
+  <div class="desk">
+    <div class="row"><label>ความเร็ว</label><input id="spd" type="range" min="20" max="200" step="5" value="70"><span class="val" id="spdV">70</span></div>
+    <div class="row"><label>ขนาดอักษร</label><input id="fs" type="range" min="28" max="120" step="2" value="56"><span class="val" id="fsV">56</span></div>
+    <div class="row"><label>นับถอยหลัง</label><input id="cd" type="range" min="0" max="5" step="1" value="3"><span class="val" id="cdV">3s</span></div>
+    <div class="row"><label>โหมดกระจก</label><div class="toggle" id="tMirror" data-on="0"></div></div>
+    <div class="row"><label>กล้องหน้า</label><div class="toggle" id="tCam" data-on="0"></div></div>
+    <div class="row"><label>อัดวิดีโอ<small>เปิดกล้อง+ไมค์ เซฟลง Photos</small></label><div class="toggle" id="tRec" data-on="0"></div></div>
+  </div>
+
+  <button class="start" id="startBtn">เริ่มอ่าน</button>
+  <p class="hint">แตะที่จอตอนอ่านเพื่อ พัก/เล่น • ลากแถบล่างเพื่อปรับระหว่างอ่าน<br>เปิด "อัดวิดีโอ" แล้วกดปุ่มแดงมุมซ้ายบนเพื่อเริ่ม/หยุดอัด</p>
+</section>
+
+<!-- ============ READER ============ -->
+<section id="reader">
+  <video id="cam" playsinline muted autoplay></video>
+  <div id="stage"><div id="scroll"></div></div>
+  <div id="guide"><span class="tri l"></span><span class="bar"></span><span class="tri r"></span></div>
+  <div id="pausePill">พัก — แตะเพื่ออ่านต่อ</div>
+  <div id="count"></div>
+
+  <button id="rec"><span class="dot"></span><span class="t" id="recT">อัด</span></button>
+  <button id="exit" aria-label="ออก"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+
+  <div id="bar">
+    <button class="ctl" id="cSpdDn"><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l-7 7 7 7"/></svg>ช้าลง</button>
+    <button class="ctl" id="cFsDn"><svg viewBox="0 0 24 24"><path d="M4 20l8-14M20 20H10M4 20h5"/></svg>เล็ก</button>
+    <button class="ctl play" id="cPlay"><svg id="playIco" viewBox="0 0 24 24"><path d="M7 5v14l12-7z" fill="#1a1200" stroke="none"/></svg>เล่น</button>
+    <button class="ctl" id="cFsUp"><svg viewBox="0 0 24 24"><path d="M4 20L14 2l10 18M4 20h20"/></svg>ใหญ่</button>
+    <button class="ctl" id="cSpdUp"><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>เร็วขึ้น</button>
+    <button class="ctl" id="cMirror"><svg viewBox="0 0 24 24"><path d="M12 3v18M7 8l-4 4 4 4M17 8l4 4-4 4"/></svg>กระจก</button>
+  </div>
+
+  <!-- PREVIEW -->
+  <div id="preview">
+    <h2><span class="d"></span>คลิปที่อัดได้</h2>
+    <video id="pv" playsinline controls></video>
+    <p class="note" id="pvNote">กด "บันทึกลง Photos" แล้วเลือก <b>Save Video</b> ในเมนูแชร์ — คลิปจะไปอยู่ในคลังรูป</p>
+    <div class="pv-actions">
+      <button class="pv-btn" id="pvRetry"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 109-9 9 9 0 00-7 3.3M3 3v4h4"/></svg>ถ่ายใหม่</button>
+      <button class="pv-btn save" id="pvSave"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>บันทึกลง Photos</button>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+  "use strict";
+  const $ = s => document.querySelector(s);
+
+  const S = {speed:70, fs:56, cd:3, mirror:false, cam:false, rec:false, text:""};
+  try{ Object.assign(S, JSON.parse(localStorage.getItem("tp")||"{}")); }catch(e){}
+  const save = ()=>{ try{ localStorage.setItem("tp", JSON.stringify(S)); }catch(e){} };
+
+  const script=$("#script"), spd=$("#spd"), fs=$("#fs"), cd=$("#cd");
+  const reader=$("#reader"), scroll=$("#scroll"), stage=$("#stage"),
+        countEl=$("#count"), bar=$("#bar"), playIco=$("#playIco"), cam=$("#cam");
+  const recBtn=$("#rec"), recT=$("#recT"), preview=$("#preview"), pv=$("#pv");
+
+  // init editor
+  script.value=S.text; spd.value=S.speed; fs.value=S.fs; cd.value=S.cd;
+  $("#tMirror").dataset.on=S.mirror?"1":"0";
+  $("#tCam").dataset.on=S.cam?"1":"0";
+  $("#tRec").dataset.on=S.rec?"1":"0";
+  const syncLabels=()=>{ $("#spdV").textContent=spd.value; $("#fsV").textContent=fs.value; $("#cdV").textContent=cd.value+"s"; };
+  const countWords=()=> $("#wc").textContent=(script.value.trim().match(/\S+/g)||[]).length+" คำ";
+  syncLabels(); countWords();
+
+  script.addEventListener("input",()=>{S.text=script.value;countWords();save();});
+  spd.addEventListener("input",()=>{S.speed=+spd.value;syncLabels();save();});
+  fs.addEventListener("input",()=>{S.fs=+fs.value;syncLabels();applyFs();save();});
+  cd.addEventListener("input",()=>{S.cd=+cd.value;syncLabels();save();});
+  $("#tMirror").addEventListener("click",e=>{S.mirror=!S.mirror;e.currentTarget.dataset.on=S.mirror?"1":"0";applyMirror();save();});
+  $("#tCam").addEventListener("click",e=>{S.cam=!S.cam;e.currentTarget.dataset.on=S.cam?"1":"0";save();});
+  $("#tRec").addEventListener("click",e=>{ S.rec=!S.rec; e.currentTarget.dataset.on=S.rec?"1":"0";
+    if(S.rec){ S.cam=true; $("#tCam").dataset.on="1"; } save(); });  // อัด = ต้องเปิดกล้อง
+
+  // ---- reader engine ----
+  let raf=null, y=0, last=0, playing=false, camStream=null;
+  function applyFs(){ scroll.style.fontSize=S.fs+"px"; scroll.style.lineHeight=1.45; }
+  function applyMirror(){ reader.classList.toggle("mirror",S.mirror); }
+
+  function tick(t){
+    if(!last) last=t;
+    const dt=(t-last)/1000; last=t;
+    if(playing){ y+=S.speed*dt; scroll.style.transform=`translateY(${-y}px)`; if(y>scroll.scrollHeight) pause(); }
+    raf=requestAnimationFrame(tick);
+  }
+  function play(){ playing=true; reader.classList.remove("paused"); setPlayIcon(true); autoHide(); }
+  function pause(){ playing=false; reader.classList.add("paused"); setPlayIcon(false); showBar(); }
+  function toggle(){ playing?pause():play(); }
+  function setPlayIcon(p){
+    playIco.innerHTML = p ? '<path d="M7 5v13M15 5v13" stroke="#1a1200" stroke-width="3.4" stroke-linecap="round"/>'
+                          : '<path d="M7 5v14l12-7z" fill="#1a1200" stroke="none"/>';
+    $("#cPlay").lastChild.textContent = p?"พัก":"เล่น";
+  }
+  let hideT=null;
+  function showBar(){ bar.classList.remove("hide"); clearTimeout(hideT); }
+  function autoHide(){ showBar(); clearTimeout(hideT); hideT=setTimeout(()=>{ if(playing) bar.classList.add("hide"); },2600); }
+
+  stage.addEventListener("click",()=>{ toggle(); if(playing) autoHide(); });
+  $("#guide").addEventListener("click",()=>{ toggle(); if(playing) autoHide(); });
+  $("#cPlay").addEventListener("click",()=>{ toggle(); if(playing) autoHide(); });
+  $("#cSpdUp").addEventListener("click",()=>{S.speed=Math.min(200,S.speed+10);spd.value=S.speed;syncLabels();save();autoHide();});
+  $("#cSpdDn").addEventListener("click",()=>{S.speed=Math.max(20,S.speed-10);spd.value=S.speed;syncLabels();save();autoHide();});
+  $("#cFsUp").addEventListener("click",()=>{S.fs=Math.min(120,S.fs+4);fs.value=S.fs;syncLabels();applyFs();save();autoHide();});
+  $("#cFsDn").addEventListener("click",()=>{S.fs=Math.max(28,S.fs-4);fs.value=S.fs;syncLabels();applyFs();save();autoHide();});
+  $("#cMirror").addEventListener("click",e=>{S.mirror=!S.mirror;applyMirror();e.currentTarget.classList.toggle("on",S.mirror);$("#tMirror").dataset.on=S.mirror?"1":"0";save();autoHide();});
+
+  document.addEventListener("keydown",e=>{
+    if(!reader.classList.contains("on")||preview.classList.contains("on")) return;
+    if(e.code==="Space"){e.preventDefault();toggle();if(playing)autoHide();}
+    else if(e.key==="ArrowUp"){$("#cSpdUp").click();}
+    else if(e.key==="ArrowDown"){$("#cSpdDn").click();}
+    else if(e.key==="+"||e.key==="="){$("#cFsUp").click();}
+    else if(e.key==="-"){$("#cFsDn").click();}
+    else if(e.key.toLowerCase()==="m"){$("#cMirror").click();}
+    else if(e.key.toLowerCase()==="r"){recBtn.click();}
+    else if(e.key==="Escape"){exit();}
+  });
+
+  // ---- camera ----
+  async function startCam(withAudio){
+    try{
+      camStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"}, audio:!!withAudio});
+      cam.srcObject=camStream; reader.classList.add("cam"); await cam.play().catch(()=>{});
+      return true;
+    }catch(err){
+      reader.classList.remove("cam");
+      alert("เปิดกล้อง/ไมค์ไม่ได้ ("+err.name+")\nต้องเปิดผ่าน HTTPS และกดอนุญาต จะอ่านแบบไม่มีกล้องแทนนะครับ");
+      S.cam=false;S.rec=false;$("#tCam").dataset.on="0";$("#tRec").dataset.on="0";save();
+      return false;
+    }
+  }
+  function stopCam(){ if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;} cam.srcObject=null; reader.classList.remove("cam"); }
+
+  // ---- recording ----
+  let mr=null, chunks=[], recMime="", lastBlob=null, recStart=0, recTimer=null;
+  function pickMime(){
+    if(!window.MediaRecorder) return "";
+    const opts=["video/mp4","video/mp4;codecs=avc1.42E01E,mp4a.40.2","video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
+    for(const o of opts){ try{ if(MediaRecorder.isTypeSupported(o)) return o; }catch(e){} }
+    return "";
+  }
+  function fmt(ms){const s=Math.floor(ms/1000);return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");}
+  function startRec(){
+    if(!camStream){ alert("ต้องเปิดกล้องก่อนถึงจะอัดได้ครับ"); return; }
+    if(!window.MediaRecorder){ alert("เบราว์เซอร์นี้อัดวิดีโอไม่ได้ ใช้ Safari บน iPhone รุ่นใหม่นะครับ"); return; }
+    chunks=[]; recMime=pickMime();
+    try{ mr = recMime ? new MediaRecorder(camStream,{mimeType:recMime}) : new MediaRecorder(camStream); }
+    catch(e){ try{ mr=new MediaRecorder(camStream);}catch(e2){ alert("เริ่มอัดไม่ได้: "+e2.message); return; } }
+    mr.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+    mr.onstop=onRecStop;
+    mr.start();
+    recStart=Date.now(); recBtn.classList.add("recording");
+    recTimer=setInterval(()=>{ recT.textContent=fmt(Date.now()-recStart); },250);
+    recT.textContent="00:00";
+  }
+  function stopRec(){ if(mr && mr.state!=="inactive"){ mr.stop(); } }
+  function onRecStop(){
+    clearInterval(recTimer); recBtn.classList.remove("recording"); recT.textContent="อัด";
+    if(!chunks.length) return;
+    lastBlob = new Blob(chunks,{type:recMime||"video/mp4"});
+    chunks=[];
+    if(pv.src) URL.revokeObjectURL(pv.src);
+    pv.src=URL.createObjectURL(lastBlob);
+    if(playing) pause();
+    preview.classList.add("on");
+  }
+  recBtn.addEventListener("click",()=>{ if(mr && mr.state==="recording") stopRec(); else startRec(); });
+
+  // save to Photos
+  async function saveToPhotos(){
+    if(!lastBlob) return;
+    const isMp4 = (lastBlob.type||"").includes("mp4");
+    const fname = "teleprompter_"+new Date().toISOString().replace(/[-:T]/g,"").slice(0,14)+"."+(isMp4?"mp4":"webm");
+    const file = new File([lastBlob], fname, {type:lastBlob.type||"video/mp4"});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file], title:fname}); return; }
+      catch(e){ if(e.name==="AbortError") return; }
+    }
+    // fallback: download / long-press preview
+    try{
+      const url=URL.createObjectURL(lastBlob);
+      const a=document.createElement("a"); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),5000);
+    }catch(e){}
+    $("#pvNote").innerHTML="เครื่องนี้เซฟตรงไม่ได้ — <b>กดค้างที่วิดีโอด้านบน</b> แล้วเลือกบันทึกลงรูปแทนได้ครับ";
+  }
+  $("#pvSave").addEventListener("click",saveToPhotos);
+  $("#pvRetry").addEventListener("click",()=>{
+    preview.classList.remove("on");
+    if(pv.src){ pv.pause(); URL.revokeObjectURL(pv.src); pv.removeAttribute("src"); pv.load(); }
+    lastBlob=null;
+  });
+
+  // ---- start / exit ----
+  async function start(){
+    if(!script.value.trim()){ script.focus(); return; }
+    scroll.textContent=script.value; applyFs(); applyMirror();
+    $("#cMirror").classList.toggle("on",S.mirror);
+    y=-(window.innerHeight*0.38); scroll.style.transform=`translateY(${-y}px)`;
+    reader.classList.add("on"); pause();
+    const needCam = S.cam || S.rec;
+    let camOk=true;
+    if(needCam) camOk=await startCam(S.rec);   // ขอไมค์ด้วยถ้าจะอัด
+    recBtn.classList.toggle("show", S.rec && camOk);
+    if(!raf) raf=requestAnimationFrame(tick);
+    runCountdown();
+  }
+  function runCountdown(){
+    let n=S.cd;
+    if(n<=0){ play(); return; }
+    countEl.classList.add("on"); countEl.textContent=n;
+    const iv=setInterval(()=>{ n--; if(n<=0){clearInterval(iv);countEl.classList.remove("on");play();} else countEl.textContent=n; },1000);
+  }
+  function exit(){
+    if(mr && mr.state==="recording"){ stopRec(); return; } // อัดค้างอยู่ → หยุดแล้วโชว์คลิปก่อน (ไม่ให้หลุด)
+    reader.classList.remove("on","paused"); playing=false; recBtn.classList.remove("show","recording");
+    preview.classList.remove("on"); stopCam();
+    if(raf){cancelAnimationFrame(raf);raf=null;last=0;}
+    countEl.classList.remove("on");
+  }
+
+  $("#startBtn").addEventListener("click",start);
+  $("#exit").addEventListener("click",exit);
+})();
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('./sw.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>
