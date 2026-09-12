@@ -1,4 +1,4 @@
-const CACHE = 'teleprompter-v4';
+const CACHE = 'teleprompter-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -23,8 +23,20 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).catch(() => caches.match('./index.html')))
-  );
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const isHTML = req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html');
+  if (isHTML) {
+    // network-first สำหรับหน้าเว็บ: ออนไลน์ได้ของใหม่เสมอ (ไม่ติดเวอร์ชันเก่าใน cache), ออฟไลน์ค่อย fallback
+    e.respondWith(
+      fetch(req).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put('./index.html', copy)).catch(() => {});
+        return res;
+      }).catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html')))
+    );
+  } else {
+    // cache-first สำหรับไฟล์ static (ไอคอน/manifest)
+    e.respondWith(caches.match(req).then((hit) => hit || fetch(req)));
+  }
 });

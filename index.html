@@ -418,7 +418,8 @@
       catch(e2){ alert("เริ่มอัดไม่ได้: "+e2.message); return; } }
     mr.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
     mr.onstop=onRecStop;
-    mr.start(1000);   // flush ทุก 1 วิ → ได้ cluster/keyframe สม่ำเสมอ เล่นย้อนได้ ไม่ค้าง
+    // iOS (mp4): อัดเป็นไฟล์เดียวสมบูรณ์ (moov ครบ) เล่นได้ลื่น • WebM: flush ทุก 1 วิ ให้ได้ keyframe สม่ำเสมอ
+    if((recMime||"").indexOf("mp4")!==-1) mr.start(); else mr.start(1000);
     recStart=Date.now(); recBtn.classList.add("recording");
     recTimer=setInterval(()=>{ recT.textContent=fmt(Date.now()-recStart); },250);
     recT.textContent="00:00";
@@ -440,8 +441,11 @@
     if(!chunks.length) return;
     lastBlob = new Blob(chunks,{type:recMime||"video/mp4"});
     chunks=[];
+    // ปลดกล้องสดออกจาก decoder ก่อนเข้าพรีวิว — iOS Safari เล่นวิดีโอได้ทีละตัว
+    // ถ้ากล้องสดยัง decode อยู่ พรีวิวจะแย่งช่องกันจนภาพค้าง (เสียงเล่นต่อ)
+    try{ cam.pause(); cam.srcObject=null; }catch(_){}
     if(pv.src) URL.revokeObjectURL(pv.src);
-    primeDuration(pv);
+    if((recMime||"").indexOf("mp4")===-1) primeDuration(pv);   // seek-trick ใช้เฉพาะ WebM (mp4 ของ iOS ไม่ต้อง)
     pv.src=URL.createObjectURL(lastBlob);
     pv.load();
     if(playing) pause();
@@ -472,6 +476,8 @@
     preview.classList.remove("on");
     if(pv.src){ pv.pause(); URL.revokeObjectURL(pv.src); pv.removeAttribute("src"); pv.load(); }
     lastBlob=null;
+    // ต่อกล้องสดกลับเข้า decoder เพื่อถ่ายใหม่
+    if(camStream){ try{ cam.srcObject=camStream; cam.play().catch(()=>{}); }catch(_){}}
   });
 
   // ---- start / exit ----
