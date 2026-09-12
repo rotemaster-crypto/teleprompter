@@ -384,7 +384,10 @@
   // ---- camera ----
   async function startCam(withAudio){
     try{
-      camStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"}, audio:!!withAudio});
+      // กำหนดเฟรมเรต/ความละเอียด ให้ encoder ทำงานคงที่ ลดอาการเฟรมหลุด/ภาพค้าง
+      const video={ facingMode:"user", frameRate:{ideal:30,max:30}, width:{ideal:1280}, height:{ideal:720} };
+      const audio=withAudio?{ echoCancellation:true, noiseSuppression:true }:false;
+      camStream = await navigator.mediaDevices.getUserMedia({video, audio});
       cam.srcObject=camStream; reader.classList.add("cam"); await cam.play().catch(()=>{});
       return true;
     }catch(err){
@@ -409,23 +412,38 @@
     if(!camStream){ alert("ต้องเปิดกล้องก่อนถึงจะอัดได้ครับ"); return; }
     if(!window.MediaRecorder){ alert("เบราว์เซอร์นี้อัดวิดีโอไม่ได้ ใช้ Safari บน iPhone รุ่นใหม่นะครับ"); return; }
     chunks=[]; recMime=pickMime();
-    try{ mr = recMime ? new MediaRecorder(camStream,{mimeType:recMime}) : new MediaRecorder(camStream); }
-    catch(e){ try{ mr=new MediaRecorder(camStream);}catch(e2){ alert("เริ่มอัดไม่ได้: "+e2.message); return; } }
+    const opts=Object.assign(recMime?{mimeType:recMime}:{}, {videoBitsPerSecond:2500000, audioBitsPerSecond:128000});
+    try{ mr = new MediaRecorder(camStream, opts); }
+    catch(e){ try{ mr = recMime ? new MediaRecorder(camStream,{mimeType:recMime}) : new MediaRecorder(camStream); }
+      catch(e2){ alert("เริ่มอัดไม่ได้: "+e2.message); return; } }
     mr.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
     mr.onstop=onRecStop;
-    mr.start();
+    mr.start(1000);   // flush ทุก 1 วิ → ได้ cluster/keyframe สม่ำเสมอ เล่นย้อนได้ ไม่ค้าง
     recStart=Date.now(); recBtn.classList.add("recording");
     recTimer=setInterval(()=>{ recT.textContent=fmt(Date.now()-recStart); },250);
     recT.textContent="00:00";
   }
   function stopRec(){ if(mr && mr.state!=="inactive"){ mr.stop(); } }
+  // WebM จาก MediaRecorder มักรายงาน duration=Infinity ทำให้พรีวิวเล่นแล้วภาพค้าง/เลื่อนไม่ได้
+  // แก้ด้วยการ seek ไปท้ายสุดครั้งหนึ่งเพื่อบังคับให้ browser คำนวณ duration ที่ถูกต้อง แล้วดีดกลับต้น
+  function primeDuration(v){
+    v.addEventListener("loadedmetadata", function meta(){
+      v.removeEventListener("loadedmetadata", meta);
+      if(v.duration===Infinity || isNaN(v.duration)){
+        v.currentTime=1e101;
+        v.addEventListener("timeupdate", function t(){ v.removeEventListener("timeupdate", t); v.currentTime=0; });
+      }
+    });
+  }
   function onRecStop(){
     clearInterval(recTimer); recBtn.classList.remove("recording"); recT.textContent="อัด";
     if(!chunks.length) return;
     lastBlob = new Blob(chunks,{type:recMime||"video/mp4"});
     chunks=[];
     if(pv.src) URL.revokeObjectURL(pv.src);
+    primeDuration(pv);
     pv.src=URL.createObjectURL(lastBlob);
+    pv.load();
     if(playing) pause();
     preview.classList.add("on");
   }
