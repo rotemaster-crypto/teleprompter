@@ -73,10 +73,12 @@
   #reader.mirror #cam{transform:scaleX(-1)}
   #reader.cam #cam{opacity:.55}
 
-  #stage{position:absolute;inset:0;overflow:hidden}
+  #stage{position:absolute;inset:0;overflow:hidden;touch-action:none;cursor:grab}
+  #stage.grabbing{cursor:grabbing}
   #scroll{position:absolute;left:0;top:0;width:100%;padding:0 6vw;white-space:pre-wrap;word-break:break-word;
-    will-change:transform;font-weight:600;letter-spacing:.3px;color:var(--ink);text-shadow:0 2px 18px rgba(0,0,0,.65);}
-  #reader.mirror #stage{transform:scaleX(-1)}
+    will-change:transform;font-weight:600;letter-spacing:.3px;color:var(--ink);text-shadow:0 2px 18px rgba(0,0,0,.65);
+    user-select:none;-webkit-user-select:none;}
+  /* โหมดกระจก = กลับซ้าย-ขวาเฉพาะภาพกล้อง (ตัวหนังสืออ่านปกติเสมอ) */
 
   #guide{position:absolute;left:0;right:0;top:38%;pointer-events:none;display:flex;align-items:center;opacity:.9}
   #guide .bar{flex:1;height:2px;background:linear-gradient(90deg,transparent,var(--tally) 12%,var(--tally) 88%,transparent)}
@@ -161,7 +163,7 @@
     <div class="row"><label>ความเร็ว</label><input id="spd" type="range" min="20" max="200" step="5" value="70"><span class="val" id="spdV">70</span></div>
     <div class="row"><label>ขนาดอักษร</label><input id="fs" type="range" min="28" max="120" step="2" value="56"><span class="val" id="fsV">56</span></div>
     <div class="row"><label>นับถอยหลัง</label><input id="cd" type="range" min="0" max="5" step="1" value="3"><span class="val" id="cdV">3s</span></div>
-    <div class="row"><label>โหมดกระจก</label><div class="toggle" id="tMirror" data-on="0"></div></div>
+    <div class="row"><label>โหมดกระจก<small>สลับซ้าย-ขวาของภาพกล้อง</small></label><div class="toggle" id="tMirror" data-on="0"></div></div>
     <div class="row"><label>กล้องหน้า</label><div class="toggle" id="tCam" data-on="0"></div></div>
     <div class="row"><label>อัดวิดีโอ<small>เปิดกล้อง+ไมค์ เซฟลง Photos</small></label><div class="toggle" id="tRec" data-on="0"></div></div>
     <div class="row"><label>ตัดเป็นชุดอัตโนมัติ<small>อ่าน/อัดทีละชุด ไม่ต้องตัดเอง</small></label><div class="toggle" id="tSeg" data-on="0"></div></div>
@@ -284,6 +286,7 @@
   // ---- reader engine ----
   let raf=null, y=0, last=0, playing=false, camStream=null;
   let segments=[""], segIndex=0;
+  let dragging=false;
   function applyFs(){ scroll.style.fontSize=S.fs+"px"; scroll.style.lineHeight=1.45; }
   function applyMirror(){ reader.classList.toggle("mirror",S.mirror); }
   const startY=()=>-(window.innerHeight*0.38);
@@ -306,7 +309,7 @@
   function tick(t){
     if(!last) last=t;
     const dt=(t-last)/1000; last=t;
-    if(playing){
+    if(playing && !dragging){
       y+=S.speed*dt; scroll.style.transform=`translateY(${-y}px)`;
       if(y>scroll.scrollHeight){ pause(); if(segIndex<segments.length-1) segNav.classList.add("show"); }
     }
@@ -324,8 +327,37 @@
   function showBar(){ bar.classList.remove("hide"); clearTimeout(hideT); }
   function autoHide(){ showBar(); clearTimeout(hideT); hideT=setTimeout(()=>{ if(playing) bar.classList.add("hide"); },2600); }
 
-  stage.addEventListener("click",()=>{ toggle(); if(playing) autoHide(); });
-  $("#guide").addEventListener("click",()=>{ toggle(); if(playing) autoHide(); });
+  // แตะ = พัก/เล่น • ลากขึ้น/ลง = กรอข้อความไปข้างหน้า/ถอยหลังมาอ่านใหม่
+  (function(){
+    let sx=0, sy=0, startScroll=0, wasPlaying=false, moved=false, pid=null;
+    const minY = ()=>startY();                 // ตำแหน่งบนสุด (เริ่มอ่าน)
+    const maxY = ()=>Math.max(startY(), scroll.scrollHeight);
+    stage.addEventListener("pointerdown", e=>{
+      pid=e.pointerId; dragging=true; moved=false;
+      sx=e.clientX; sy=e.clientY; startScroll=y; wasPlaying=playing;
+      try{ stage.setPointerCapture(pid); }catch(_){}
+    });
+    stage.addEventListener("pointermove", e=>{
+      if(!dragging || e.pointerId!==pid) return;
+      const dy=e.clientY-sy;
+      if(!moved && (Math.abs(dy)>6 || Math.abs(e.clientX-sx)>6)){ moved=true; stage.classList.add("grabbing"); }
+      if(moved){
+        y = Math.max(minY(), Math.min(maxY(), startScroll - dy));  // ลากลง=ถอยหลัง, ลากขึ้น=ไปข้างหน้า
+        scroll.style.transform=`translateY(${-y}px)`;
+        showBar();
+      }
+    });
+    function endDrag(e){
+      if(!dragging || (pid!==null && e && e.pointerId!==pid)) return;
+      dragging=false; stage.classList.remove("grabbing");
+      try{ stage.releasePointerCapture(pid); }catch(_){}
+      pid=null;
+      if(moved){ pause(); }                     // กรอแล้วค้างไว้ให้อ่านต่อจากจุดนั้น
+      else { toggle(); if(playing) autoHide(); } // แตะเฉย ๆ = สลับ พัก/เล่น
+    }
+    stage.addEventListener("pointerup", endDrag);
+    stage.addEventListener("pointercancel", endDrag);
+  })();
   $("#cPlay").addEventListener("click",()=>{ toggle(); if(playing) autoHide(); });
   $("#cSpdUp").addEventListener("click",()=>{S.speed=Math.min(200,S.speed+10);spd.value=S.speed;syncLabels();save();autoHide();});
   $("#cSpdDn").addEventListener("click",()=>{S.speed=Math.max(20,S.speed-10);spd.value=S.speed;syncLabels();save();autoHide();});
@@ -439,11 +471,16 @@
     if(!raf) raf=requestAnimationFrame(tick);
     runCountdown();
   }
+  function beginPlayback(){
+    play();
+    // อัดอัตโนมัติทันทีที่นับถอยหลังจบ (ถ้าเปิดโหมดอัด + กล้องพร้อม)
+    if(S.rec && camStream && window.MediaRecorder && !(mr && mr.state==="recording")) startRec();
+  }
   function runCountdown(){
     let n=S.cd;
-    if(n<=0){ play(); return; }
+    if(n<=0){ beginPlayback(); return; }
     countEl.classList.add("on"); countEl.textContent=n;
-    const iv=setInterval(()=>{ n--; if(n<=0){clearInterval(iv);countEl.classList.remove("on");play();} else countEl.textContent=n; },1000);
+    const iv=setInterval(()=>{ n--; if(n<=0){clearInterval(iv);countEl.classList.remove("on");beginPlayback();} else countEl.textContent=n; },1000);
   }
   function exit(){
     if(mr && mr.state==="recording"){ stopRec(); return; } // อัดค้างอยู่ → หยุดแล้วโชว์คลิปก่อน (ไม่ให้หลุด)
